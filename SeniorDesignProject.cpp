@@ -4,6 +4,7 @@
 #include <vector>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <string>
 
 // Graph demands
@@ -23,7 +24,7 @@ enum e_sort_order
     max
 };
 
-enum algorithm_type
+enum policy_type
 {
     none_selected    = 0,
     CCP     = 1,
@@ -120,7 +121,7 @@ class Graph{
     {
         sort_order = static_cast<e_sort_order>(t_sort);
         useSA = t_useSA;
-        algorithm = static_cast<algorithm_type>(t_algorithm);
+        policy = static_cast<policy_type>(t_algorithm);
         
         if(sort_order < e_sort_order::none || sort_order >= e_sort_order::max) sort_order = e_sort_order::none;
         
@@ -128,12 +129,8 @@ class Graph{
         { 
             for(int j = 0; j < MAX_NODE; ++j)
             {
-                adjacency_m[i][j][0].v_tree[0] = -1;
+                adjacency_m[i][j] = -1;
                 connection_m[i][j] = -1;
-                // for(int p = 1; p < static_cast<int>((BANDWIDTH/FSPACING)+1); ++p)
-                // {
-                //     adjacency_m[i][j][p] = 0;
-                // }
             }
             dijkstra_table[i].previous_node = 0;
             dijkstra_table[i].shortest_distance = 0;
@@ -259,7 +256,7 @@ class Graph{
         int weight = 0;
         for(int i = 0; i < path.size()-1; ++i)
         {
-            weight += adjacency_m[path[i]][path[i+1]][0].v_tree[0];
+            weight += adjacency_m[path[i]][path[i+1]];
         }
         return weight;
     }
@@ -279,8 +276,8 @@ class Graph{
 
     void disconnect_link(int origin, int dest)
     {
-        adjacency_m[origin][dest][0].v_tree[0] = -1;
-        adjacency_m[dest][origin][0].v_tree[0] = -1;
+        adjacency_m[origin][dest] = -1;
+        adjacency_m[dest][origin] = -1;
     }
     
     bool shortest_path_dij(int origin, int dest, std::vector<int>& path, int& total_weight){
@@ -300,11 +297,11 @@ class Graph{
             // Update Weights
             for(int i = 0; i < MAX_NODE; ++i)
             {
-                if(i == minw_index || adjacency_m[minw_index][i][0].v_tree[0] == -1 || dijkstra_table[i].visited) continue;
+                if(i == minw_index || adjacency_m[minw_index][i] == -1 || dijkstra_table[i].visited) continue;
 
-                if(adjacency_m[minw_index][i][0].v_tree[0] + total_distance < dijkstra_table[i].shortest_distance)
+                if(adjacency_m[minw_index][i] + total_distance < dijkstra_table[i].shortest_distance)
                 {
-                    dijkstra_table[i].shortest_distance = adjacency_m[minw_index][i][0].v_tree[0] + total_distance;
+                    dijkstra_table[i].shortest_distance = adjacency_m[minw_index][i] + total_distance;
                     dijkstra_table[i].previous_node = minw_index;
                 }
             }
@@ -312,8 +309,8 @@ class Graph{
             dijkstra_table[minw_index].visited = true;
             
             // Get node with min weight
-            float temp_distance = INF;
-            int temp_index = INF;
+            int temp_distance = INF, temp_index = INF;
+    
             for(int i = 0; i < MAX_NODE; ++i)
             {
                 if(dijkstra_table[i].visited) continue;
@@ -397,98 +394,126 @@ class Graph{
             bool con_success = false;
             for(int k = 0; k < num_paths; ++k)
             {
-                if(try_connect(v, k_paths[k], k_distance[k], min_slot, max_slot))
+                
+                switch (policy)
                 {
-                    std::cout << "Connection: " <<  curr_vertex.origin << " -> " << curr_vertex.dest << " (" << min_slot << ", " << max_slot << ") success\n";
-                    con_success = true;
+                case policy_type::none_selected:
+                    {
+                        con_success = try_connect(v, k_paths[k], k_distance[k], min_slot, max_slot);
+                        break;
+                    }
+                case policy_type::CCP:
+                    {
+                        con_success = try_connectCCP(v, k_paths[k], k_distance[k], min_slot, max_slot);
+                        break;
+                    }
+                case policy_type::FCAP:
+                    {
+                        con_success = try_connectFCAP(v, k_paths[k], k_distance[k], min_slot, max_slot);
+                        break;
+                    }
+                }
+                if(con_success)
+                {
+                    std::cout << "Connection: " <<  curr_vertex.origin << " -> " << curr_vertex.dest << ": Path " << print_path(k_paths[k]);
+                    std::cout << ", Total weight: " << k_distance[k] << " (" << min_slot << ", " << max_slot << ") success\n";
                     break;
                 }
             }
             if(!con_success)
-                std::cout << "Connection: " <<  curr_vertex.origin << " -> " << curr_vertex.dest << " blocked\n";
+            {
+                std::cout << "Connection: " <<  curr_vertex.origin << " -> " << curr_vertex.dest << ": Failed\n";
+            }
         }
     }
 
     bool try_connect(int& v_index, std::vector<int>& path, int& distance, int& min_slot, int& max_slot)
     {
-    //     const int Total_Slots = static_cast<int>(BANDWIDTH/FSPACING);
-    //     const int origin = vertices_con[v_index].origin - 1;
-    //     const int dest = vertices_con[v_index].dest - 1;
-    //     
-    //     // Go through all links and check for Continuity, Contiguity and Non-overlapping constraints
-    //     int v_link[Total_Slots] = {0};
-    //     
-    //     int req_slots;
-    //     if(useSA)
-    //         req_slots = static_cast<int>((vertices_con[v_index].cost) / (getBaudRate()*getModulation(distance)));
-    //     else
-    //         req_slots = static_cast<int>(vertices_con[v_index].cost / (getBaudRate()*getModulation(distance)));
-    //     
-    //     // Get the state of all links
-    //     for(int link_i = 0; link_i < path.size()-1; ++link_i)
-    //     {
-    //         for(int slot_i = 0; slot_i < Total_Slots; ++slot_i)
-    //         {
-    //             if(adjacency_m[path[link_i]][path[link_i+1]][slot_i+1] || v_link[slot_i])
-    //                 v_link[slot_i] = 1;
-    //             else
-    //                 v_link[slot_i] = 0;
-    //         }
-    //     }
-    //
-    //     // Using the current state of all relevant links, allocate continuous slots as required
-    //     bool try_connect = true;
-    //     for(int slot_i = 0; slot_i < Total_Slots; ++slot_i)
-    //     {
-    //         if(!v_link[slot_i])
-    //         {
-    //             for(int i = slot_i+1; i < slot_i + req_slots; ++i)
-    //             {
-    //                 if(v_link[i])
-    //                 {
-    //                     slot_i = i;
-    //                     try_connect = false;
-    //                     break;
-    //                 }
-    //             }
-    //             // Checked if connection fits here and it does
-    //             if(try_connect)
-    //             {
-    //                 min_slot = slot_i;
-    //                 max_slot = slot_i + req_slots - 1;
-    //                 for(int i = slot_i; i < slot_i + req_slots; ++i)
-    //                 {
-    //                     v_link[i] = v_index + 1;
-    //                 }
-    //                 break;
-    //             }
-    //                 std::cout << "Connection: " << v_index + 1 << " could not be allocated";
-    //         }
-    //     }
-    //
-    //     // Update alloc
-    //     if(try_connect)
-    //     {
-    //         for(int link_i = 0; link_i < path.size()-1; ++link_i)
-    //         {
-    //             for(int slot_i = 0; slot_i < Total_Slots; ++slot_i)
-    //             {
-    //                 adjacency_m[path[link_i]][path[link_i+1]][slot_i+1] = v_link[slot_i];
-    //                 adjacency_m[path[link_i+1]][path[link_i]][slot_i+1] = v_link[slot_i];
-    //             }
-    //         }
-    //     }
-    //     
-    return true;
-    }
+        const int Total_Slots = static_cast<int>(BANDWIDTH/FSPACING);
+        const int origin = vertices_con[v_index].origin - 1;
+        const int dest = vertices_con[v_index].dest - 1;
+             
+        // Go through all links and check for Continuity, Contiguity and Non-overlapping constraints
+        int v_link[Total_Slots] = {0};
+        
+        int req_slots = static_cast<int>(vertices_con[v_index].cost / (getBaudRate()*getModulation(distance)));
+         
+        // Get the state of all links
+        for(int link_i = 0; link_i < path.size()-1; ++link_i)
+        {
+            for(int slot_i = 0; slot_i < Total_Slots; ++slot_i)
+            {
+                if(links[path[link_i]][path[link_i+1]][slot_i].v_tree[0] || v_link[slot_i])
+                    v_link[slot_i] = 1;
+                else
+                    v_link[slot_i] = 0;
+            }
+        }
+        
     
+        // Using the current state of all relevant links, allocate continuous slots as required
+        bool try_connect = true;
+        for(int slot_i = 0; slot_i < Total_Slots; ++slot_i)
+        {
+            if(!v_link[slot_i])
+            {
+                for(int i = slot_i+1; i < slot_i + req_slots; ++i)
+                {
+                    if(v_link[i])
+                    {
+                        slot_i = i;
+                        try_connect = false;
+                        break;
+                    }
+                }
+                // Checked if connection fits here and it does
+                if(try_connect)
+                {
+                    min_slot = slot_i;
+                    max_slot = slot_i + req_slots - 1;
+                    for(int i = slot_i; i < slot_i + req_slots; ++i)
+                    {
+                        v_link[i] = v_index + 1;
+                    }
+                    break;
+                }
+            }
+        }
+
+        if(!try_connect)
+        {
+            std::cout << "Connection: " << v_index + 1 << " could not be allocated";
+            return false;
+        }
+
+        // Update alloc
+
+        for(int link_i = 0; link_i < path.size()-1; ++link_i)
+        {
+            for(int slot_i = min_slot; slot_i <= max_slot; ++slot_i)
+            {
+                links[path[link_i]][path[link_i+1]][slot_i].v_tree[0] = v_link[slot_i];
+                links[path[link_i+1]][path[link_i]][slot_i].v_tree[0] = v_link[slot_i];
+            }
+        }
+        return true;
+    }
+
+    bool try_connectFCAP(int& v_index, std::vector<int>& path, int& distance, int& min_slot, int& max_slot)
+    {
+        return true;
+    }
+    bool try_connectCCP(int& v_index, std::vector<int>& path, int& distance, int& min_slot, int& max_slot)
+    {
+        return true;
+    }
     void generate_adj_m()
     {
         // Fill in the Adjacency matrix
         for(const auto& vertex : vertices_adj){
             // Origin and Destination must be shifted by -1. (Nodes start from 1 whereas the array starts from 0)
-            adjacency_m[vertex.origin-1][vertex.dest-1][0].v_tree[0] = vertex.cost;
-            adjacency_m[vertex.dest-1][vertex.origin-1][0].v_tree[0] = vertex.cost;
+            adjacency_m[vertex.origin-1][vertex.dest-1] = vertex.cost;
+            adjacency_m[vertex.dest-1][vertex.origin-1] = vertex.cost;
         }
     }
 
@@ -503,12 +528,8 @@ class Graph{
             int distance;
             std::vector<int> path;
             shortest_path_dij(vertex.origin, vertex.dest, path, distance);
-
-            int req_slots;
-            if(useSA)
-                req_slots = static_cast<int>((vertex.cost) / (getBaudRate()*getModulation(distance)));
-            else
-                req_slots = static_cast<int>(vertex.cost / (getBaudRate()*getModulation(distance)));
+            
+            int req_slots = static_cast<int>(vertex.cost / (getBaudRate()*getModulation(distance)));
 
             if(sort_order != e_sort_order::none)
             {
@@ -557,7 +578,7 @@ class Graph{
         std::cout << "Adjacency Matrix:  (Showing distance between links)\n\n";
         for(int row = 0; row < MAX_NODE; ++row){
             for(int col = 0; col < MAX_NODE; ++col){
-                std::cout << std::setw(5) << adjacency_m[row][col][0].v_tree[0];
+                std::cout << std::setw(5) << adjacency_m[row][col];
             }
             std::cout << '\n';
         }
@@ -576,15 +597,25 @@ class Graph{
         std::cout << '\n';
     }
 
+     std::string print_path(const std::vector<int>& path)
+    {
+        std::stringstream ss;
+        ss << "{";
+        for(int i = 0; i < path.size()-1; ++i)
+            ss << path[i]+1 << ", ";
+        ss << 1 + path[path.size() - 1] << "}";
+        return ss.str();
+    }
     // Variables
+    
+    slot links[MAX_NODE][MAX_NODE][static_cast<int>(BANDWIDTH/FSPACING)];
 
-    // All adjacency_m[i][j][0].v_tree[0] contains the distance of the 
-    slot adjacency_m[MAX_NODE][MAX_NODE][static_cast<int>((BANDWIDTH/FSPACING)+1)];
+    int adjacency_m[MAX_NODE][MAX_NODE];
     int connection_m[MAX_NODE][MAX_NODE];
     dijkstraEntry dijkstra_table[MAX_NODE];
     e_sort_order sort_order = e_sort_order::none;
     bool useSA = false;
-    algorithm_type algorithm;
+    policy_type policy;
     
     std::vector<vertex> vertices_adj;
     std::vector<vertex> vertices_con;
@@ -712,7 +743,7 @@ bool read_files(Graph& network){
 int main(int argc,char* argv[]){
 
     bool useSA;
-    int algorithm;
+    int policy;
     
     std::cout << "Use Spread Spectrum / Code Allocation? (Y / n, default = n): ";
     std::cin >> useSA;
@@ -720,26 +751,26 @@ int main(int argc,char* argv[]){
     {
         useSA = true;
         std::cout << "Use CCP or FCAP Algorithm? (1 = CCP / 2 = FCAP, default = 2): ";
-        std::cin >> algorithm;
-        if(algorithm != 1)
-            algorithm = 2;
+        std::cin >> policy;
+        if(policy != 1)
+            policy = 2;
     }
     else
     {
         useSA = false;
-        algorithm = 0;
+        policy = 0;
     }
         
     
-    int sort_order;
-    std::cout << "Sort connections according to weight?\n";
-    std::cout << "No sort order: 0\n";
-    std::cout << "Ascending Order : 1\n";
-    std::cout << "Descending order : 2\n\n";
-    std::cout << "Sort order : ";
-    std::cin >> sort_order;
+    int sort_order = 0;
+    // std::cout << "Sort connections according to weight?\n";
+    // std::cout << "No sort order: 0\n";
+    // std::cout << "Ascending Order : 1\n";
+    // std::cout << "Descending order : 2\n\n";
+    // std::cout << "Sort order : ";
+    // std::cin >> sort_order;
     
-    Graph network(sort_order, useSA, algorithm);
+    Graph network(sort_order, useSA, policy);
     
     // Read and fill graph data in "Network" variable;
     if(!read_files(network)){
