@@ -63,27 +63,56 @@ struct slot
         }
         return -1;
     }
+
+    int get_spread_factor(int& index)
+    {
+        int current_index = index;
+        int spread_factor_pow = 0;
+        
+        while (current_index != 0)
+        {
+            current_index = get_to_parent(current_index);
+            if(current_index != 0) spread_factor_pow++;
+        }
+
+        int spread_factor = 1;
+        for (int i = 0; i < spread_factor_pow; ++i)
+            spread_factor = spread_factor*2;
+        
+        return spread_factor;
+    }
     
     void disable_children(int current_index)
     {
-        int left_child = current_index*2 + 1;
-        int right_child = current_index*2 + 2;
-
-        if (left_child >= 0 && left_child < MAX_SF*2-1)
+        // left child = false, right child =true
+        // i = 0 -> left, i = 1 -> right
+        for (int i = 0; i < 2; ++i)
         {
-            v_tree[left_child] = -1;
-            available_codes--;
-            disable_children(left_child);
+            const int child = get_to_child(current_index, i);
+            if (child != -1)
+            {
+                v_tree[child] = -1;
+                available_codes--;
+                disable_children(child);
+            }
         }
 
-        if (right_child >= 0 && right_child < MAX_SF*2-1)
-        {
-            v_tree[right_child] = -1;
-            available_codes--;
-            disable_children(right_child);
-        }
+        
+        
     }
     void disable_parent(int current_index)
+    {
+        int parent_index = get_to_parent(current_index);
+
+        if (parent_index != -1)
+        {
+            v_tree[parent_index] = -1;
+            available_codes--;
+            disable_parent(parent_index);
+        }
+    }
+
+    int get_to_parent(int current_index)
     {
         int parent_index;
         bool is_right_child;
@@ -97,12 +126,25 @@ struct slot
         else
             parent_index = (current_index-1)/2;
 
-        if (parent_index >= 0 && parent_index < MAX_SF*2-1)
-        {
-            v_tree[parent_index] = -1;
-            available_codes--;
-            disable_parent(parent_index);
-        }
+        if(parent_index >= 0 && parent_index < MAX_SF*2-1)
+            return parent_index;
+        
+        return -1;
+    }
+
+    int get_to_child(int current_index, bool right)
+    {
+        int child;
+        
+        if(right)
+            child = current_index*2 + 2;
+        else
+            child = current_index*2 + 1;
+
+        if(child >= 0 && child < MAX_SF*2-1)
+            return child;
+        
+        return -1;
     }
 };
 
@@ -153,7 +195,7 @@ class Graph
 {
 
     public:
-    Graph(const int new_id, int t_sort, int t_algorithm)
+    Graph(const int new_id, char t_sort, char t_algorithm)
     {
         id = new_id;
         sort_order = static_cast<e_sort_order>(t_sort);
@@ -170,7 +212,7 @@ class Graph
             for(int j = 0; j < MAX_NODE; ++j)
             {
                 adjacency_m[i][j] = -1;
-                connection_m[i][j] = -1;
+                // connection_m[i][j] = -1;
 
                 links[i][j] = new link();
             }
@@ -649,9 +691,10 @@ class Graph
     bool try_connectFCAP(const int& v_index, const std::vector<int>& path, const int& distance, int& min_slot, int& max_slot)
     {
         const int total_slots = static_cast<int>(BANDWIDTH/FSPACING);
-  
+        int source = path.front();
+        int dest = path.back();
+        
         slot v_link[total_slots];
-        slot v_slot;
         
 	    // Get the state of all links
 	    for(int link_i = 0; link_i < path.size()-1; ++link_i)
@@ -669,12 +712,12 @@ class Graph
 	    }
         
 	    // Using the current state of all relevant links, allocate continuous slots as required
-	    bool try_connect = true;
+	    bool try_connect = false;
         
 	    std::vector<int> code_indexes;
-        int code_index = -1;
-	    int current_speed = 0;
-
+        float current_speed;
+        int code_index;
+        
         const int min_req_slots = static_cast<int>(std::ceil(vertices_con[v_index].cost / (getBaudRate()*getModulation(distance))));
         const int max_req_slots = static_cast<int>(std::ceil(vertices_con[v_index].cost*MAX_SF / (getBaudRate()*getModulation(distance))));
         
@@ -682,28 +725,64 @@ class Graph
 	    {
 	        min_slot = slot_i;
 	        int spread_factor = MAX_SF;
-	        bool try_slots = false;
+	        
 	        // Get the range of slots that have at least one code available
 	        for(int i = slot_i; i < slot_i+max_req_slots; ++i)
 	        {
+	            code_index = -1;
                 while (spread_factor > 0)
                 {
-                    if(find_avail_code(v_link[i],spread_factor) == -1)
-                    {
-                        try_slots = true;
-                        max_slot = i-1;
-                        break;
-                    }
+                    code_index = find_avail_code(v_link[i],spread_factor);
+                    if(code_index != -1) break;
                     spread_factor = spread_factor/2;
                 }
-	            if (try_slots) break;
+
+	            if(code_index == -1)
+	            {
+	                max_slot = i-1;
+	                break;
+	            }
+
+	            if(i == slot_i+max_req_slots-1) max_slot = i;
 	        }
 
+	        int range = max_slot - min_slot;
 	        // Find in the range the appropriate code indexes to allocate that satisfy the network demands
-	        if(max_slot - min_slot >= min_req_slots && max_slot - min_slot <= max_req_slots)
+	        if(range >= min_req_slots && range < max_req_slots)
 	        {
-	            for(int i = min_slot; i < max_slot; ++i)
+	            // Try and allocate codes within the free range we have
+	            for (int i = 0; i <= range; ++i)
+	                code_indexes.push_back(-1);
+	            
+	            while(true)
 	            {
+	                current_speed = 0;
+	                
+	                for(int i = min_slot; i < min_slot+max_req_slots; ++i)
+	                {
+	                    code_index = -1;
+	                    spread_factor = MAX_SF;
+                        if(code_indexes[i-min_slot] != -1) spread_factor = v_link[i].get_spread_factor(code_indexes[i-min_slot]) / 2;
+	                    
+	                    while (spread_factor > 0)
+	                    {
+	                        code_index = find_avail_code(v_link[i], spread_factor);
+	                        if(code_index != -1) break;
+	                        spread_factor = spread_factor/2;
+	                    }
+	                
+	                    code_indexes[i-min_slot] = code_index;
+
+	                    current_speed += (getBaudRate()*getModulation(distance)) / spread_factor;
+	                    // if(current_speed >= connection_m[source][dest])
+	                    // {
+	                    //     max_slot = i;
+	                    //     try_connect = true;
+	                    //     break;
+	                    // }
+	                }
+	                if(try_connect) break;
+
 	                
 	            }
 	        }
@@ -767,7 +846,7 @@ class Graph
         }
     }
 
-    void generate_con_m()
+    void sort_connections()
     {
             // Fill in the Connection Matrix and get network demands
         std::vector<vertex> sorted_connections;
@@ -816,9 +895,6 @@ class Graph
                     sorted_distances.insert(sorted_distances.begin()+index, distance);
                 }
             }
-
-            connection_m[vertex.source-1][vertex.dest-1] = vertex.cost;
-            connection_m[vertex.dest-1][vertex.source-1] = vertex.cost;
         }
         if(sort_order != e_sort_order::none) vertices_con = sorted_connections;
     }
@@ -835,17 +911,17 @@ class Graph
         std::cout << '\n';
     }
 
-    void print_con_matrix() const
-    {
-        std::cout << "Connection Matrix: (Showing the requested transfer speed for the connection)\n\n";
-        for(int row = 0; row < MAX_NODE; ++row){
-            for(int col = 0; col < MAX_NODE; ++col){
-                std::cout << std::setw(5) << connection_m[row][col];
-            }
-            std::cout << '\n';
-        }
-        std::cout << '\n';
-    }
+    // void print_con_matrix() const
+    // {
+    //     std::cout << "Connection Matrix: (Showing the requested transfer speed for the connection)\n\n";
+    //     for(int row = 0; row < MAX_NODE; ++row){
+    //         for(int col = 0; col < MAX_NODE; ++col){
+    //             std::cout << std::setw(5) << connection_m[row][col];
+    //         }
+    //         std::cout << '\n';
+    //     }
+    //     std::cout << '\n';
+    // }
 
     std::string print_connection(const int& source, const int& dest, const std::vector<int>& path, const int& distance)
     {
@@ -887,7 +963,7 @@ class Graph
     link* links[MAX_NODE][MAX_NODE];
     
     int adjacency_m[MAX_NODE][MAX_NODE];
-    int connection_m[MAX_NODE][MAX_NODE];
+    // int connection_m[MAX_NODE][MAX_NODE];
 
     dijkstraEntry dijkstra_table[MAX_NODE];
 
@@ -1014,22 +1090,22 @@ bool fill_graph(Graph& network, std::string& graph, std::string& connections)
 
     network.generate_adj_m();
 
-    network.generate_con_m();
+    if(network.sort_order != e_sort_order::none) network.sort_connections();
 
     return true;
 }
 
 bool read_demands(int& argc,char** argv, std::vector<demand>& demands_info)
 {
-    // if(argc < 2)
-    // {
-    //     std::cout << "Error: Not enough input arguments\n";
-    //     return false;
-    // }
-
     std::ifstream demands_file;
-    // demands_file.open(argv[1], std::ifstream::in);
-    demands_file.open("Demands.txt", std::ifstream::in);
+    if(argc < 2)
+    {
+        std::cout << "Warning! Demands file not included. Attempting to read Demands.txt\n";
+        demands_file.open("Demands.txt", std::ifstream::in);
+    }
+    else
+        demands_file.open(argv[1], std::ifstream::in);
+    
     
     if(!demands_file.is_open())
     {
