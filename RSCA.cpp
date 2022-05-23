@@ -811,8 +811,6 @@ class Graph
 	    // Update alloc
 	    for(int link_i = 0; link_i < path.size()-1; ++link_i)
 	    {
-	        if(max_slot - min_slot != code_indexes.size()) std::cout << "Warning! Code indexes (size) does not match with the required slots";
-	        
 		    for(int slot_i = min_slot; slot_i <= max_slot; ++slot_i)
 		    {
 		        links[path[link_i]][path[link_i+1]]->slot[slot_i].assign_code(code_indexes[slot_i], v_index+1);
