@@ -200,18 +200,6 @@ class Graph
 {
 
     public:
-    Graph(const int new_id, char t_sort, char t_algorithm)
-    {
-        id = new_id;
-        sort_order = static_cast<e_sort_order>(t_sort);
-        policy = static_cast<policy_type>(t_algorithm);
-
-        // If input values from file are incorrect
-        if(sort_order < e_sort_order::none || sort_order >= e_sort_order::max_sort)
-            std::cout << "Warning! Invalid sort order, no sorting selected by default\n";
-        if(policy < policy_type::none_selected || policy >= policy_type::max_pol)
-            std::cout << "Warning! Invalid policy type, no spread spectrum policy selected by default\n";
-    }
     ~Graph()
     {
         for(int i = 0; i < max_node; ++i)
@@ -226,8 +214,18 @@ class Graph
     
     // Functions
 
-    void init_graph()
+    void init_graph(const int new_id, char t_sort, char t_algorithm)
     {
+        id = new_id;
+        sort_order = static_cast<e_sort_order>(t_sort);
+        policy = static_cast<policy_type>(t_algorithm);
+
+        // If input values from file are incorrect
+        if(sort_order < e_sort_order::none || sort_order >= e_sort_order::max_sort)
+            std::cout << "Warning! Invalid sort order, no sorting selected by default\n";
+        if(policy < policy_type::none_selected || policy >= policy_type::max_pol)
+            std::cout << "Warning! Invalid policy type, no spread spectrum policy selected by default\n";
+        
         links = new link*[max_node];
         adjacency_m = new int*[max_node];
         dijkstra_table = new dijkstraEntry[max_node];
@@ -719,8 +717,6 @@ class Graph
     bool try_connectFCAP(const int& v_index, const std::vector<int>& path, const int& distance, int& min_slot, int& max_slot)
     {
         const int total_slots = static_cast<int>(BANDWIDTH/FSPACING);
-        int source = path.front();
-        int dest = path.back();
         
         slot v_link[total_slots];
         
@@ -1315,22 +1311,27 @@ int main(int argc,char* argv[]){
     // Run through all scenarios from demands
     for (int i = 0; i < demands.size(); ++i)
     {
-        Graph network(i,demands[i].sorting, demands[i].policy);
+        auto start_clock = std::chrono::high_resolution_clock::now();
         
-        // Fill Graph with the data from the Graph and Connections files
+        Graph network;
+        
+        // Get data from the Graph and Connections files for later initialization
         if(!fill_graph(network, demands[i].graph_file, demands[i].connections_file)) return -1;
 
-        network.init_graph();
-        
-        auto start_clock = std::chrono::high_resolution_clock::now();
+        // Initialize network
+        network.init_graph(i,demands[i].sorting, demands[i].policy);
+
+        // Attempt to form all connections form the connections file
         network.form_connections(demands[i].run_connections);
+        
         auto stop_clock = std::chrono::high_resolution_clock::now();
 
+        // Get execution time
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(stop_clock - start_clock);
-        
+
+        // Print results
         network.print_performance(duration.count(), demands[i].run_connections);
     }
     
-    std::cout << "End!\n";
     return 1;
 }
