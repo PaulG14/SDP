@@ -66,13 +66,15 @@ struct slot
 
     int get_spread_factor(int& index)
     {
+        if(index < 0 || index >= MAX_SF*2-1) return -1;
+        
         int current_index = index;
         int spread_factor_pow = 0;
         
         while (current_index != 0)
         {
             current_index = get_to_parent(current_index);
-            if(current_index != 0) spread_factor_pow++;
+            spread_factor_pow++;
         }
 
         int spread_factor = 1;
@@ -151,6 +153,7 @@ struct slot
 struct link
 {
     slot slot[static_cast<int>(BANDWIDTH/FSPACING)];
+    int available_slots = static_cast<int>(BANDWIDTH/FSPACING);
 };
 
 struct vertex
@@ -167,6 +170,7 @@ struct demand
     char sorting;
     std::string graph_file;
     std::string connections_file;
+    int run_connections;
 };
 
 struct dijkstraEntry
@@ -467,7 +471,7 @@ class Graph
         return true;
     }
 
-    void form_connections()
+    void form_connections(int& run_connections)
     {
         std::ofstream output;
         std::string filename = "Output" + std::to_string(id) + ".txt";
@@ -477,6 +481,8 @@ class Graph
         
         for(int v = 0; v < vertices_con.size(); ++v)
         {
+            if(v == run_connections) break;
+                
             const vertex& curr_vertex = vertices_con[v];
             int source = curr_vertex.source-1;
             int dest = curr_vertex.dest-1;
@@ -516,15 +522,20 @@ class Graph
                 }
                 if(con_success)
                 {
-                    std::cout << print_connection(curr_vertex.source, curr_vertex.dest, k_paths[k], k_distance[k]) << print_slots(v, min_slot, max_slot, k_paths[k]) <<'\n';
+                    // std::cout << print_connection(curr_vertex.source, curr_vertex.dest, k_paths[k], k_distance[k]) << print_slots(v, min_slot, max_slot, k_paths[k]) <<'\n';
                     output << print_connection(curr_vertex.source, curr_vertex.dest, k_paths[k], k_distance[k]) << print_slots(v, min_slot, max_slot, k_paths[k]) <<'\n';
+
+                    // Add to average number of hops
+                    avrg_hops += k_paths[k].size()-1;
                     
+                    established_con.push_back(v);
                     break;
                 }
             }
             if(!con_success)
             {
                 std::cout << "Connection: " <<  curr_vertex.source << " -> " << curr_vertex.dest << ": Failed\n";
+                failed_con.push_back(v);
             }
         }
         output.close();
@@ -736,19 +747,20 @@ class Graph
                     if(code_index != -1) break;
                     spread_factor = spread_factor/2;
                 }
-
+     
 	            if(code_index == -1)
 	            {
 	                max_slot = i-1;
 	                break;
 	            }
-
+     
 	            if(i == slot_i+max_req_slots-1) max_slot = i;
 	        }
 
 	        int range = max_slot - min_slot;
+
 	        // Find in the range the appropriate code indexes to allocate that satisfy the network demands
-	        if(range >= min_req_slots && range < max_req_slots)
+	        if(range >= min_req_slots-1 && range < max_req_slots)
 	        {
 	            // Try and allocate codes within the free range we have
 	            for (int i = 0; i <= range; ++i)
@@ -756,10 +768,9 @@ class Graph
 	            
 	            while(true)
 	            {
-	                current_speed = 0;
-	                
-	                for(int i = min_slot; i < min_slot+max_req_slots; ++i)
+	                for(int i = min_slot; i <= min_slot+range; ++i)
 	                {
+	                    current_speed = 0;
 	                    code_index = -1;
 	                    spread_factor = MAX_SF;
                         if(code_indexes[i-min_slot] != -1) spread_factor = v_link[i].get_spread_factor(code_indexes[i-min_slot]) / 2;
@@ -770,35 +781,33 @@ class Graph
 	                        if(code_index != -1) break;
 	                        spread_factor = spread_factor/2;
 	                    }
-	                
 	                    code_indexes[i-min_slot] = code_index;
 
-	                    current_speed += (getBaudRate()*getModulation(distance)) / spread_factor;
-	                    // if(current_speed >= connection_m[source][dest])
-	                    // {
-	                    //     max_slot = i;
-	                    //     try_connect = true;
-	                    //     break;
-	                    // }
+	                    for(int j =  min_slot; j <= min_slot+range; ++j)
+	                    {
+	                        int sf = v_link[j].get_spread_factor(code_indexes[j-min_slot]);
+	                        if(code_indexes[j] != -1) current_speed += (getBaudRate()*getModulation(distance)) / sf;
+	                    }
+	                    // current_speed += (getBaudRate()*getModulation(distance)) / spread_factor;
+	                    if(current_speed >= vertices_con[v_index].cost)
+	                    {
+	                        // max_slot = i;
+	                        try_connect = true;
+	                        break;
+	                    }
 	                }
 	                if(try_connect) break;
-
-	                
 	            }
 	        }
 	        else
 	        {
 	            slot_i = max_slot+1;
 	        }
-
 	        if(try_connect) break;
 	    }
-
-        if(!try_connect)
-	    {
-		    return false;
-	    }
-  
+     
+        if(!try_connect) return false;
+     
 	    // Update alloc
 	    for(int link_i = 0; link_i < path.size()-1; ++link_i)
 	    {
@@ -810,6 +819,7 @@ class Graph
 		        // links[path[link_i+1]][path[link_i]]->slot[slot_i].assign_code(code_indexes[slot_i], v_index+1);
 		    }
 	    }
+        return true;
     }
 
     int find_avail_code(const slot& v_slot, int spread_factor)
@@ -911,18 +921,22 @@ class Graph
         std::cout << '\n';
     }
 
-    // void print_con_matrix() const
-    // {
-    //     std::cout << "Connection Matrix: (Showing the requested transfer speed for the connection)\n\n";
-    //     for(int row = 0; row < MAX_NODE; ++row){
-    //         for(int col = 0; col < MAX_NODE; ++col){
-    //             std::cout << std::setw(5) << connection_m[row][col];
-    //         }
-    //         std::cout << '\n';
-    //     }
-    //     std::cout << '\n';
-    // }
-
+    void get_slot_util()
+    {
+        // TODO: slot utilization
+        // const int total_slots = static_cast<int>(BANDWIDTH/FSPACING);
+        // for (int i = 0; i < MAX_NODE; i++)
+        // {
+        //     for(int j = 0; j < MAX_NODE; j++)
+        //     {
+        //         for(int k = 0; k < total_slots; k++)
+        //         {
+        //             
+        //         }
+        //     }
+        // }
+    }
+    
     std::string print_connection(const int& source, const int& dest, const std::vector<int>& path, const int& distance)
     {
         std::stringstream ss;
@@ -932,7 +946,7 @@ class Graph
         ss << "(" << source << " -> " << dest << "): ";
 
         // Print path
-        ss << "Hops: " << path.size() << ", ";
+        ss << "Hops: " << path.size()-1 << ", ";
         ss << "Path{";
         for(int i = 0; i < path.size()-1; ++i)
             ss << path[i]+1 << ", ";
@@ -949,7 +963,7 @@ class Graph
         std::stringstream ss;
         ss.clear();
         // Slots allocated
-        ss << "Slots: (" << min_slot << ", " << max_slot << ") [" << links[path[0]][path[1]]->slot[min_slot].get_index(v_index);
+        ss << "Slots: (" << min_slot << " - " << max_slot << ") [" << links[path[0]][path[1]]->slot[min_slot].get_index(v_index);
         for (int i = min_slot+1; i <= max_slot; ++i)
         {
             ss << ", " << links[path[0]][path[1]]->slot[i].get_index(v_index);
@@ -959,11 +973,18 @@ class Graph
         return ss.str();
     }
 
+    void print_performance()
+    {
+        //TODO: print performance stats and average spreading
+        // Average number of hops
+        
+        
+    }
+    
     // Variables
     link* links[MAX_NODE][MAX_NODE];
     
     int adjacency_m[MAX_NODE][MAX_NODE];
-    // int connection_m[MAX_NODE][MAX_NODE];
 
     dijkstraEntry dijkstra_table[MAX_NODE];
 
@@ -973,6 +994,13 @@ class Graph
 
     std::vector<vertex> vertices_adj;
     std::vector<vertex> vertices_con;
+
+    // Variables used to check performance
+    std::vector<int> established_con;
+    std::vector<int> failed_con;
+
+    float avrg_hops = 0;
+    float avrg_spreading = 0;
 };
 
 // fills the necessary data from the given graph and connections files
@@ -1125,7 +1153,7 @@ bool read_demands(int& argc,char** argv, std::vector<demand>& demands_info)
         
         if(temp == '\n')
         {
-            new_demand.connections_file = buffer; 
+            new_demand.run_connections = std::stoi(buffer); 
 
             demands_info.push_back(new_demand);
             
@@ -1153,6 +1181,11 @@ bool read_demands(int& argc,char** argv, std::vector<demand>& demands_info)
                 {
                     // Add Graph file
                     new_demand.graph_file = buffer;
+                    break;
+                }
+            case 3:
+                {
+                    new_demand.connections_file = buffer;
                     break;
                 }
             default:{}
@@ -1245,7 +1278,9 @@ int main(int argc,char* argv[]){
         // Fill Graph with the data from the Graph and Connections files
         if(!fill_graph(network, demands[i].graph_file, demands[i].connections_file)) return -1;
 
-        network.form_connections();
+        // TODO: check runtime
+        //
+        network.form_connections(demands[i].run_connections);
     }
     
     std::cout << "End!\n";
