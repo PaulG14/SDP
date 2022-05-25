@@ -1,3 +1,2 @@
-﻿2 0 Graph14.txt Connections.txt 200
-0 0 Graph14.txt Connections.txt 100
+﻿2 0 Graph14.txt Connection_lists\14\Connections-20_3.txt 99999
 #
