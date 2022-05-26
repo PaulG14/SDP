@@ -16,17 +16,19 @@
 
 enum e_sort_order
 {
-    none        = 0,
-    ascending   = 1,
-    descending  = 2,
+    none                = 0,
+    rate_ascending      = 1,
+    rate_descending     = 2,
+    distance_ascending  = 3,
+    distance_descending = 4,
     max_sort
 };
 
 enum policy_type
 {
-    none_selected    = 0,
-    CCP     = 1,
-    FCAP    = 2,
+    none_selected   = 0,
+    CCP             = 1,
+    FCAP            = 2,
     max_pol
 };
 
@@ -256,6 +258,8 @@ class Graph
         }
 
         generate_adj_m();
+
+        if(sort_order != e_sort_order::none) sort_connections();
     }
     
     int yenKSP(int source, const int dest, std::vector<int> k_paths[], int k_distance[])
@@ -498,12 +502,17 @@ class Graph
 
     void form_connections(int& run_connections)
     {
-        std::ofstream output;
-        std::string filename = "Output_lists\\Output" + std::to_string(id) + ".txt";
+        std::ofstream output, matlabout;
+        std::string filename = "ConnectionOut_lists\\ConnectionOut_" + std::to_string(id) + ".txt";
 
         output.open(filename, std::ofstream::out);
         if(!output.is_open()) std::cout << "Warning! Could not open output file\n";
 
+        filename = "MatlabOut_lists\\MatlabOut_" + std::to_string(id) + ".txt";
+
+        matlabout.open(filename, std::ofstream::out);
+        if(!matlabout.is_open()) std::cout << "Warning! Could not open MatlabOut file\n";
+        
         if(run_connections < 0 || run_connections > vertices_con.size()) run_connections = vertices_con.size();
         
         for(int v = 0; v < vertices_con.size(); ++v)
@@ -556,12 +565,32 @@ class Graph
 
                     int l1 = k_paths[k][0];
                     int l2 = k_paths[k][1];
-                    
-                    overall_spreading += get_average_spread(v, links[l1][l2], min_slot, max_slot);
+
+                    int t_spread = get_average_spread(v, links[l1][l2], min_slot, max_slot);
+                    overall_spreading += t_spread;
 
                     if(overall_max_slot < max_slot) overall_max_slot = max_slot;
                     
                     established_con.push_back(v);
+
+                    // MatlabOut prints
+
+                    // Hops
+                    matlabout << k_paths[k].size()-1 << ' ';
+                    for (int i = 0; i < k_paths[k].size(); ++i)
+                    {
+                        matlabout << k_paths[k][i]+1 << ' ';
+                    }
+
+                    // Slots
+                    matlabout << min_slot << ' ' << max_slot << ' ';
+                    for (int i = min_slot; i <=max_slot; i++)
+                    {
+                        matlabout << links[l1][l2].slot[i].get_index(v+1) << ' ';
+                    }
+
+                    // Average spread
+                    matlabout << t_spread << '\n';
                     break;
                 }
             }
@@ -573,6 +602,7 @@ class Graph
             }
         }
         output.close();
+        matlabout.close();
     }
 
     bool try_connect(const int& v_index, const std::vector<int>& path, const int& distance, int& min_slot, int& max_slot)
@@ -907,49 +937,88 @@ class Graph
 
         for(const auto& vertex : vertices_con){
             // source and Destination must be shifted by -1. (Nodes start from 1 whereas the array starts from 0)
-            int distance;
-            std::vector<int> path;
-            shortest_path_dij(vertex.source, vertex.dest, path, distance);
 
-            int req_slots = static_cast<int>(std::ceil(vertex.cost / (getBaudRate()*getModulation(distance))));
-
-            if(sort_order != e_sort_order::none)
+            switch (sort_order)
             {
-                if(sorted_connections.empty())
+            case distance_ascending:
+            case distance_descending:
                 {
-                    sorted_connections.push_back(vertex);
-                    sorted_distances.push_back(distance);
-                }
-                else
-                {
-                    int index = -1;
-                    for(int i = 0; i < sorted_connections.size(); i++)
+                    int distance;
+                    std::vector<int> path;
+                    shortest_path_dij(vertex.source, vertex.dest, path, distance);
+                    
+                    if(sorted_connections.empty())
                     {
-                        if(sort_order == e_sort_order::ascending)
-                        {
-                            if(distance < sorted_distances[i])
-                            {
-                                index = i;
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            if(distance > sorted_distances[i])
-                            {
-                                index = i;
-                                break;
-                            }
-                        }
+                        sorted_connections.push_back(vertex);
+                        sorted_distances.push_back(distance);
                     }
-                    if(index == -1) index = sorted_connections.size();
+                    else
+                    {
+                        int index = -1;
+                        for(int i = 0; i < sorted_connections.size(); i++)
+                        {
+                            if(sort_order == distance_ascending)
+                            {
+                                if(distance < sorted_distances[i])
+                                {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                if(distance > sorted_distances[i])
+                                {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                        }
+                        if(index == -1) index = sorted_connections.size();
 
-                    sorted_connections.insert(sorted_connections.begin()+index, vertex);
-                    sorted_distances.insert(sorted_distances.begin()+index, distance);
+                        sorted_connections.insert(sorted_connections.begin()+index, vertex);
+                        sorted_distances.insert(sorted_distances.begin()+index, distance);
+                    }
+                    break;
+                }
+            case rate_ascending:
+            case rate_descending:
+                {
+                    if(sorted_connections.empty())
+                    {
+                        sorted_connections.push_back(vertex);
+                    }
+                    else
+                    {
+                        int index = -1;
+                        for(int i = 0; i < sorted_connections.size(); i++)
+                        {
+                            if(sort_order == rate_ascending)
+                            {
+                                if(vertex.cost < sorted_connections[i].cost)
+                                {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                            else
+                            {
+                                if(vertex.cost > sorted_connections[i].cost)
+                                {
+                                    index = i;
+                                    break;
+                                }
+                            }
+                        }
+                        if(index == -1) index = sorted_connections.size();
+
+                        sorted_connections.insert(sorted_connections.begin()+index, vertex);
+                    }
+                    break;
                 }
             }
         }
-        if(sort_order != e_sort_order::none) vertices_con = sorted_connections;
+        vertices_con = sorted_connections;
     }
 
     void print_adj_matrix() const
@@ -1043,7 +1112,7 @@ class Graph
         if(connections_run > vertices_con.size() || connections_run <= 0) connections_run = vertices_con.size();
         
         std::ofstream performance_out;
-        std::string filename = "Performance_lists\\Output" + std::to_string(id) + ".txt";
+        std::string filename = "PerformanceOut_lists\\PerformanceOut_" + std::to_string(id) + ".txt";
         performance_out.open(filename, std::ofstream::out);
 
         performance_out << "\n\nOverall performance:\n\n";
@@ -1226,10 +1295,6 @@ bool fill_graph(Graph& network, std::string& graph, std::string& connections)
             buffer += temp;
     }
     connection_file.close();
-
-    
-
-    if(network.sort_order != e_sort_order::none) network.sort_connections();
 
     return true;
 }
