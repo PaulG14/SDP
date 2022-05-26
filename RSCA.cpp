@@ -222,7 +222,7 @@ class Graph
     public:
     
     // Functions
-    void init_graph(const int new_id, char t_sort, char t_algorithm)
+    void init_graph(const int new_id, char t_sort, char t_algorithm, int& t_run_connections)
     {
         id = new_id;
         sort_order = static_cast<e_sort_order>(t_sort);
@@ -259,7 +259,13 @@ class Graph
 
         generate_adj_m();
 
-        if(sort_order != e_sort_order::none) sort_connections();
+        
+        if(t_run_connections < 0 || t_run_connections > vertices_con.size())
+            run_connections = vertices_con.size();
+        else
+            run_connections = t_run_connections;
+        
+        if(sort_order != none) sort_connections(run_connections);
     }
     
     int yenKSP(int source, const int dest, std::vector<int> k_paths[], int k_distance[])
@@ -500,7 +506,7 @@ class Graph
         return true;
     }
 
-    void form_connections(int& run_connections)
+    void form_connections()
     {
         std::ofstream output, matlabout;
         std::string filename = "ConnectionOut_lists\\ConnectionOut_" + std::to_string(id) + ".txt";
@@ -512,8 +518,6 @@ class Graph
 
         matlabout.open(filename, std::ofstream::out);
         if(!matlabout.is_open()) std::cout << "Warning! Could not open MatlabOut file\n";
-        
-        if(run_connections < 0 || run_connections > vertices_con.size()) run_connections = vertices_con.size();
         
         for(int v = 0; v < vertices_con.size(); ++v)
         {
@@ -929,15 +933,15 @@ class Graph
         }
     }
 
-    void sort_connections()
+    void sort_connections(int run_connections)
     {
             // Fill in the Connection Matrix and get network demands
         std::vector<vertex> sorted_connections;
         std::vector<int> sorted_distances;
 
-        for(const auto& vertex : vertices_con){
+        for(int con = 0; con < run_connections; ++con){
             // source and Destination must be shifted by -1. (Nodes start from 1 whereas the array starts from 0)
-
+            vertex curr_vertex = vertices_con[con];
             switch (sort_order)
             {
             case distance_ascending:
@@ -945,11 +949,11 @@ class Graph
                 {
                     int distance;
                     std::vector<int> path;
-                    shortest_path_dij(vertex.source, vertex.dest, path, distance);
+                    shortest_path_dij(curr_vertex.source, curr_vertex.dest, path, distance);
                     
                     if(sorted_connections.empty())
                     {
-                        sorted_connections.push_back(vertex);
+                        sorted_connections.push_back(curr_vertex);
                         sorted_distances.push_back(distance);
                     }
                     else
@@ -976,7 +980,7 @@ class Graph
                         }
                         if(index == -1) index = sorted_connections.size();
 
-                        sorted_connections.insert(sorted_connections.begin()+index, vertex);
+                        sorted_connections.insert(sorted_connections.begin()+index, curr_vertex);
                         sorted_distances.insert(sorted_distances.begin()+index, distance);
                     }
                     break;
@@ -986,7 +990,7 @@ class Graph
                 {
                     if(sorted_connections.empty())
                     {
-                        sorted_connections.push_back(vertex);
+                        sorted_connections.push_back(curr_vertex);
                     }
                     else
                     {
@@ -995,7 +999,7 @@ class Graph
                         {
                             if(sort_order == rate_ascending)
                             {
-                                if(vertex.cost < sorted_connections[i].cost)
+                                if(curr_vertex.cost < sorted_connections[i].cost)
                                 {
                                     index = i;
                                     break;
@@ -1003,7 +1007,7 @@ class Graph
                             }
                             else
                             {
-                                if(vertex.cost > sorted_connections[i].cost)
+                                if(curr_vertex.cost > sorted_connections[i].cost)
                                 {
                                     index = i;
                                     break;
@@ -1012,7 +1016,7 @@ class Graph
                         }
                         if(index == -1) index = sorted_connections.size();
 
-                        sorted_connections.insert(sorted_connections.begin()+index, vertex);
+                        sorted_connections.insert(sorted_connections.begin()+index, curr_vertex);
                     }
                     break;
                 }
@@ -1162,6 +1166,7 @@ class Graph
     std::vector<vertex> vertices_adj;
     std::vector<vertex> vertices_con;
     int max_node = 0;
+    int run_connections;
     
     // Variables used to check performance
     std::vector<int> established_con;
@@ -1402,12 +1407,12 @@ int main(int argc,char* argv[]){
         if(!fill_graph(network, demands[id].graph_file, demands[id].connections_file)) return -1;
 
         // Initialize network
-        network.init_graph(id+1,demands[id].sorting, demands[id].policy);
+        network.init_graph(id+1,demands[id].sorting, demands[id].policy, demands[id].run_connections);
 
         network.print_adj_matrix();
         
         // Attempt to form all connections form the connections file
-        network.form_connections(demands[id].run_connections);
+        network.form_connections();
         
         auto stop_clock = std::chrono::high_resolution_clock::now();
 
