@@ -62,7 +62,29 @@ struct slot
         return -1;
     }
 
-    int get_spread_factor(int& index)
+    int get_spread_factor(const int& con_index) const
+    {
+        int index = get_index(con_index+1);
+        
+        if(index < 0 || index >= MAX_SF*2-1) return -1;
+        
+        int current_index = index;
+        int spread_factor_pow = 0;
+        
+        while (current_index != 0)
+        {
+            current_index = get_to_parent(current_index);
+            spread_factor_pow++;
+        }
+
+        int spread_factor = 1;
+        for (int i = 0; i < spread_factor_pow; ++i)
+            spread_factor = spread_factor*2;
+        
+        return spread_factor;
+    }
+
+    int get_spread_factor_from_index(const int& index) const
     {
         if(index < 0 || index >= MAX_SF*2-1) return -1;
         
@@ -81,7 +103,6 @@ struct slot
         
         return spread_factor;
     }
-    
     void disable_children(int current_index)
     {
         // left child = false, right child =true
@@ -112,7 +133,7 @@ struct slot
         }
     }
 
-    int get_to_parent(int current_index)
+    int get_to_parent(int current_index) const
     {
         int parent_index;
         bool is_right_child;
@@ -132,7 +153,7 @@ struct slot
         return -1;
     }
 
-    int get_to_child(int current_index, bool right)
+    int get_to_child(int current_index, bool right) const
     {
         int child;
         
@@ -527,9 +548,16 @@ class Graph
                 {
                     std::cout << print_connection(v, curr_vertex.source, curr_vertex.dest, k_paths[k], k_distance[k]) << print_slots(v, min_slot, max_slot, k_paths[k]) <<'\n';
                     output << print_connection(v, curr_vertex.source, curr_vertex.dest, k_paths[k], k_distance[k]) << print_slots(v, min_slot, max_slot, k_paths[k]) <<'\n';
-
+                    
                     // Add to average number of hops
                     total_hops += k_paths[k].size()-1;
+
+                    int l1 = k_paths[k][0];
+                    int l2 = k_paths[k][1];
+                    
+                    overall_spreading += get_average_spread(v, links[l1][l2], min_slot, max_slot, k_paths[k].size());
+
+                    if(overall_max_slot < max_slot) overall_max_slot = max_slot;
                     
                     established_con.push_back(v);
                     break;
@@ -789,7 +817,7 @@ class Graph
 	                    current_speed = 0;
 	                    code_index = -1;
 	                    spread_factor = MAX_SF;
-                        if(code_indexes[i-min_slot] != -1) spread_factor = v_link[i].get_spread_factor(code_indexes[i-min_slot]) / 2;
+                        if(code_indexes[i-min_slot] != -1) spread_factor = v_link[i].get_spread_factor_from_index(code_indexes[i-min_slot]) / 2;
 	                    
 	                    while (spread_factor > 0)
 	                    {
@@ -806,7 +834,7 @@ class Graph
 	                    // Sum
 	                    for(int j =  min_slot; j <= min_slot+range; ++j)
 	                    {
-	                        int sf = v_link[j].get_spread_factor(code_indexes[j-min_slot]);
+	                        int sf = v_link[j].get_spread_factor_from_index(code_indexes[j-min_slot]);
 	                        if(code_indexes[j-min_slot] != -1) current_speed += (getBaudRate()*getModulation(distance)) / sf;
 	                    }
 
@@ -949,6 +977,20 @@ class Graph
         }
         return utilized_slots;
     }
+
+    float get_average_spread(int connection_index,const link& t_link, int min_slot, int max_slot, int path_size) const
+    {
+        // Average Spreading
+        int sum_spread = 0;
+        for (int i = min_slot; i <= max_slot; ++i)
+        {
+            sum_spread += t_link.slot[i].get_spread_factor(connection_index);
+        }
+        
+        float current_average_spread = static_cast<float>(sum_spread)/static_cast<float>(path_size-1);
+        
+        return current_average_spread;
+    }
     
     std::string print_connection(int v_index, const int& source, const int& dest, const std::vector<int>& path, const int& distance)
     {
@@ -975,15 +1017,22 @@ class Graph
     {
         std::stringstream ss;
         ss.clear();
+
         // Slots allocated
-        
-        ss << "Slots: (" << min_slot << " - " << max_slot << ") [" << links[path[0]][path[1]].slot[min_slot].get_index(v_index+1);
+        int index = links[path[0]][path[1]].slot[min_slot].get_index(v_index+1);
+        ss << "Slots: (" << min_slot << " - " << max_slot << ") [" << index;
+
         for (int i = min_slot+1; i <= max_slot; ++i)
         {
-            ss << ", " << links[path[0]][path[1]].slot[i].get_index(v_index+1);
+            index = links[path[0]][path[1]].slot[i].get_index(v_index+1);
+            ss << ", " << index;
         }
         ss << ']';
 
+        const float current_average_spread = get_average_spread(v_index, links[path[0]][path[1]], min_slot, max_slot, path.size());
+        
+        ss << " Average Spread: " << current_average_spread;
+        
         return ss.str();
     }
 
@@ -991,7 +1040,6 @@ class Graph
     {
         if(connections_run > vertices_con.size() || connections_run <= 0) connections_run = vertices_con.size();
         
-        //TODO: print performance stats and average spreading
         std::ofstream performance_out;
         std::string filename = "Output" + std::to_string(id) + ".txt";
         performance_out.open(filename, std::ofstream::app);
@@ -1018,12 +1066,12 @@ class Graph
         float slot_util = (static_cast<float>(get_slot_util())/static_cast<float>(total_slots))*100;
         performance_out << "Slot utilization: " << std::fixed << std::setprecision(3) << slot_util << "%\n\n";
 
-        float avrg_hops = static_cast<float>(total_hops)/static_cast<float>(established_con.size());
-        performance_out << "Average number of hops: " << total_hops/established_con.size() << '\n';
-        performance_out << "Average spread overall: " << '\n';
+        overall_spreading = overall_spreading/established_con.size();
+        float avrg_hops = total_hops/static_cast<float>(established_con.size());
+        performance_out << "Average number of hops: " << avrg_hops << '\n';
+        performance_out << "Average spread overall: " << overall_spreading << '\n';
         
-        // Slot and spectrum utilization (confidential and not)
-        // Max Slot?
+        performance_out << "Maximum slot used in all links: " << overall_max_slot << '\n';
         
         performance_out.close();
     }
@@ -1049,7 +1097,8 @@ class Graph
     std::vector<int> failed_con;
 
     float total_hops = 0;
-    float avrg_spreading = 0;
+    float overall_spreading = 0;
+    int overall_max_slot = -1;
 };
 
 // fills the necessary data from the given graph and connections files
@@ -1260,62 +1309,6 @@ bool read_demands(int& argc,char** argv, std::vector<demand>& demands_info)
     demands_file.close();
     
     return true;
-}
-
-std::string generate_connections(int num_con, int max_node)
-{
-    std::ofstream connections;
-    connections.open("Connections.txt", std::ios::out);
-
-    srand (time(nullptr));
-        
-    int source, dest, cost;
-    bool confidential;
-
-    for(int i = 0; i < num_con; ++i)
-    {
-        
-        source = rand() % max_node + 1;
-        dest = rand() % max_node + 1;
-        while (source == dest)
-        {
-            dest = rand() % max_node + 1;
-        }
-        confidential = rand() % 1;
-        
-        int cost_op = rand() % 4;
-        switch (cost_op)
-        {
-        case 0:
-            {
-                cost = 50;
-                break;
-            }
-        case 1:
-            {
-                cost = 100;
-                break;
-            }
-        case 2:
-            {
-                cost = 150;
-                break;
-            }
-        case 3:
-            {
-                cost = 200;
-                break;
-            }
-        }
-        
-
-        connections << source << ' ' << dest << ' ' << cost << ' ' << confidential << '\n';
-    }
-
-    connections << '#';
-    connections.close();
-    
-    return "Connections.txt";
 }
 
 int main(int argc,char* argv[]){
