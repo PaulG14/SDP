@@ -189,7 +189,7 @@ struct demand
     char sorting;
     std::string graph_file;
     std::string connections_file;
-    int run_connections;
+    int run_connections = -1;
 };
 
 struct dijkstraEntry
@@ -499,10 +499,12 @@ class Graph
     void form_connections(int& run_connections)
     {
         std::ofstream output;
-        std::string filename = "Output" + std::to_string(id) + ".txt";
+        std::string filename = "Output_lists\\Output" + std::to_string(id) + ".txt";
 
         output.open(filename, std::ofstream::out);
         if(!output.is_open()) std::cout << "Warning! Could not open output file\n";
+
+        if(run_connections < 0 || run_connections > vertices_con.size()) run_connections = vertices_con.size();
         
         for(int v = 0; v < vertices_con.size(); ++v)
         {
@@ -555,7 +557,7 @@ class Graph
                     int l1 = k_paths[k][0];
                     int l2 = k_paths[k][1];
                     
-                    overall_spreading += get_average_spread(v, links[l1][l2], min_slot, max_slot, k_paths[k].size());
+                    overall_spreading += get_average_spread(v, links[l1][l2], min_slot, max_slot);
 
                     if(overall_max_slot < max_slot) overall_max_slot = max_slot;
                     
@@ -978,7 +980,7 @@ class Graph
         return utilized_slots;
     }
 
-    float get_average_spread(int connection_index,const link& t_link, int min_slot, int max_slot, int path_size) const
+    float get_average_spread(int connection_index,const link& t_link, int min_slot, int max_slot) const
     {
         // Average Spreading
         int sum_spread = 0;
@@ -987,7 +989,7 @@ class Graph
             sum_spread += t_link.slot[i].get_spread_factor(connection_index);
         }
         
-        float current_average_spread = static_cast<float>(sum_spread)/static_cast<float>(path_size-1);
+        float current_average_spread = static_cast<float>(sum_spread)/static_cast<float>(max_slot - min_slot + 1);
         
         return current_average_spread;
     }
@@ -1029,7 +1031,7 @@ class Graph
         }
         ss << ']';
 
-        const float current_average_spread = get_average_spread(v_index, links[path[0]][path[1]], min_slot, max_slot, path.size());
+        const float current_average_spread = get_average_spread(v_index, links[path[0]][path[1]], min_slot, max_slot);
         
         ss << " Average Spread: " << current_average_spread;
         
@@ -1041,8 +1043,8 @@ class Graph
         if(connections_run > vertices_con.size() || connections_run <= 0) connections_run = vertices_con.size();
         
         std::ofstream performance_out;
-        std::string filename = "Output" + std::to_string(id) + ".txt";
-        performance_out.open(filename, std::ofstream::app);
+        std::string filename = "Performance_lists\\Output" + std::to_string(id) + ".txt";
+        performance_out.open(filename, std::ofstream::out);
 
         performance_out << "\n\nOverall performance:\n\n";
         performance_out << "Execution time: " << duration << " milliseconds\n\n";
@@ -1262,7 +1264,13 @@ bool read_demands(int& argc,char** argv, std::vector<demand>& demands_info)
         
         if(temp == '\n')
         {
-            new_demand.run_connections = std::stoi(buffer); 
+            if(option == 3)
+            {
+                new_demand.connections_file = buffer;
+                new_demand.run_connections = -1;
+            }
+            else
+                new_demand.run_connections = std::stoi(buffer); 
 
             demands_info.push_back(new_demand);
             
@@ -1329,7 +1337,7 @@ int main(int argc,char* argv[]){
         if(!fill_graph(network, demands[id].graph_file, demands[id].connections_file)) return -1;
 
         // Initialize network
-        network.init_graph(id,demands[id].sorting, demands[id].policy);
+        network.init_graph(id+1,demands[id].sorting, demands[id].policy);
 
         network.print_adj_matrix();
         
