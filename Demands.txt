@@ -1,4 +1,4 @@
-﻿1 1 Graph14.txt Connection_lists1000\14\Connections-60_1.txt
+﻿1 4 Graph14.txt Connection_lists1000\14\Connections-60_1.txt
 2 1 Graph14.txt Connection_lists1000\14\Connections-60_1.txt
 0 1 Graph14.txt Connection_lists1000\14\Connections-60_1.txt
 #
